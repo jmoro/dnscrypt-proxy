@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+.github
+
+# CI/CD
+.ci
+
+# Documentation
+*.md
+LICENSE
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Build artifacts
+*.exe
+*.msi
+dnscrypt-proxy-*.tar.gz
+dnscrypt-proxy-*.zip
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Test files
+*_test.go
+
+# Windows MSI build files
+contrib/msi
+
+# Existing binaries
+windows/
