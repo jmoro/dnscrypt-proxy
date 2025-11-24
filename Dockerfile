@@ -14,10 +14,10 @@
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apk add --no-cache git ca-certificates tzdata curl jq
 
-# Version of dnscrypt-proxy to build (default: latest as of 2025-01-24)
-ARG DNSCRYPT_PROXY_VERSION=2.1.14
+# Version of dnscrypt-proxy to build (empty = fetch latest from GitHub)
+ARG DNSCRYPT_PROXY_VERSION
 
 # Set up build arguments for cross-compilation
 ARG TARGETPLATFORM
@@ -28,9 +28,16 @@ ARG TARGETVARIANT
 WORKDIR /src
 
 # Download and extract source from GitHub
-ADD https://github.com/DNSCrypt/dnscrypt-proxy/archive/${DNSCRYPT_PROXY_VERSION}.tar.gz /tmp/dnscrypt-proxy.tar.gz
-RUN tar -xzf /tmp/dnscrypt-proxy.tar.gz -C /src --strip-components=1 && \
-    rm /tmp/dnscrypt-proxy.tar.gz
+# If DNSCRYPT_PROXY_VERSION is empty, fetch latest version from GitHub API
+RUN set -ex; \
+    if [ -z "$DNSCRYPT_PROXY_VERSION" ]; then \
+        DNSCRYPT_PROXY_VERSION=$(curl -s https://api.github.com/repos/DNSCrypt/dnscrypt-proxy/releases/latest | jq -r .tag_name); \
+        echo "Resolved latest version: $DNSCRYPT_PROXY_VERSION"; \
+    fi; \
+    curl -L "https://github.com/DNSCrypt/dnscrypt-proxy/archive/${DNSCRYPT_PROXY_VERSION}.tar.gz" -o /tmp/dnscrypt-proxy.tar.gz; \
+    tar -xzf /tmp/dnscrypt-proxy.tar.gz -C /src --strip-components=1; \
+    rm /tmp/dnscrypt-proxy.tar.gz; \
+    echo "$DNSCRYPT_PROXY_VERSION" > /src/.version
 
 # Build the binary for the target platform
 RUN --mount=type=cache,target=/root/.cache/go-build \
