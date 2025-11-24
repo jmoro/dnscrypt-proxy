@@ -14,7 +14,7 @@
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata curl jq
+RUN apk add --no-cache ca-certificates tzdata curl jq
 
 # Version of dnscrypt-proxy to build (empty = fetch latest from GitHub)
 ARG DNSCRYPT_PROXY_VERSION
@@ -34,7 +34,7 @@ RUN set -ex; \
         DNSCRYPT_PROXY_VERSION=$(curl -s https://api.github.com/repos/DNSCrypt/dnscrypt-proxy/releases/latest | jq -r .tag_name); \
         echo "Resolved latest version: $DNSCRYPT_PROXY_VERSION"; \
     fi; \
-    curl -L "https://github.com/DNSCrypt/dnscrypt-proxy/archive/${DNSCRYPT_PROXY_VERSION}.tar.gz" -o /tmp/dnscrypt-proxy.tar.gz; \
+    curl -fsSL "https://github.com/DNSCrypt/dnscrypt-proxy/archive/${DNSCRYPT_PROXY_VERSION}.tar.gz" -o /tmp/dnscrypt-proxy.tar.gz; \
     tar -xzf /tmp/dnscrypt-proxy.tar.gz -C /src --strip-components=1; \
     rm /tmp/dnscrypt-proxy.tar.gz; \
     echo "$DNSCRYPT_PROXY_VERSION" > /src/.version
@@ -46,40 +46,40 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH} \
     GOARM=${TARGETVARIANT#v} \
-    go build -mod vendor -ldflags="-s -w" -o /dnscrypt-proxy ./dnscrypt-proxy
+    go build -mod vendor -ldflags="-s -w" -trimpath -o /dnscrypt-proxy ./dnscrypt-proxy
+
+# Prepare files for final stage
+RUN mkdir -p /etc/dnscrypt-proxy && \
+    cp /src/dnscrypt-proxy/example-dnscrypt-proxy.toml /etc/dnscrypt-proxy/dnscrypt-proxy.toml
 
 # Final stage - minimal runtime image
-FROM alpine:latest
+# Using distroless for security (no shell, minimal attack surface)
+# Alternative: use 'FROM scratch' for absolute minimum size
+FROM gcr.io/distroless/static-debian12:nonroot
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
-
-# Create non-root user for security
-RUN addgroup -S dnscrypt && adduser -S dnscrypt -G dnscrypt
+# OCI labels
+LABEL org.opencontainers.image.title="dnscrypt-proxy" \
+      org.opencontainers.image.description="A flexible DNS proxy with support for encrypted DNS protocols" \
+      org.opencontainers.image.url="https://github.com/DNSCrypt/dnscrypt-proxy" \
+      org.opencontainers.image.source="https://github.com/DNSCrypt/dnscrypt-proxy" \
+      org.opencontainers.image.licenses="ISC"
 
 # Copy binary from builder
 COPY --from=builder /dnscrypt-proxy /usr/local/bin/dnscrypt-proxy
 
-# Create configuration directory
-RUN mkdir -p /etc/dnscrypt-proxy && chown dnscrypt:dnscrypt /etc/dnscrypt-proxy
+# Copy configuration
+COPY --from=builder /etc/dnscrypt-proxy /etc/dnscrypt-proxy
 
-# Copy example configuration (users should mount their own config)
-COPY --from=builder /src/dnscrypt-proxy/example-dnscrypt-proxy.toml /etc/dnscrypt-proxy/dnscrypt-proxy.toml
-RUN chown dnscrypt:dnscrypt /etc/dnscrypt-proxy/dnscrypt-proxy.toml
-
-# Switch to non-root user
-USER dnscrypt
+# Copy timezone data and CA certificates from builder
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Expose DNS ports (UDP and TCP)
 EXPOSE 53/udp 53/tcp
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD dnscrypt-proxy -resolve cloudflare.com || exit 1
 
 # Set working directory
 WORKDIR /etc/dnscrypt-proxy
 
 # Default command
-ENTRYPOINT ["dnscrypt-proxy"]
+ENTRYPOINT ["/usr/local/bin/dnscrypt-proxy"]
 CMD ["-config", "/etc/dnscrypt-proxy/dnscrypt-proxy.toml"]
