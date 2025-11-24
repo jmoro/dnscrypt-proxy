@@ -6,12 +6,18 @@
 #
 # Or build for a single architecture:
 #   docker build -t dnscrypt-proxy .
+#
+# Build with a specific version:
+#   docker build --build-arg DNSCRYPT_PROXY_VERSION=2.1.14 -t dnscrypt-proxy .
 
 # Build stage
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
+
+# Version of dnscrypt-proxy to build (default: latest as of 2025-01-24)
+ARG DNSCRYPT_PROXY_VERSION=2.1.14
 
 # Set up build arguments for cross-compilation
 ARG TARGETPLATFORM
@@ -21,13 +27,10 @@ ARG TARGETVARIANT
 
 WORKDIR /src
 
-# Copy go mod files first for better caching
-COPY go.mod go.sum ./
-COPY vendor/ vendor/
-
-# Copy source code
-COPY dnscrypt-proxy/ dnscrypt-proxy/
-COPY utils/ utils/
+# Download and extract source from GitHub
+ADD https://github.com/DNSCrypt/dnscrypt-proxy/archive/${DNSCRYPT_PROXY_VERSION}.tar.gz /tmp/dnscrypt-proxy.tar.gz
+RUN tar -xzf /tmp/dnscrypt-proxy.tar.gz -C /src --strip-components=1 && \
+    rm /tmp/dnscrypt-proxy.tar.gz
 
 # Build the binary for the target platform
 RUN --mount=type=cache,target=/root/.cache/go-build \
@@ -54,7 +57,7 @@ COPY --from=builder /dnscrypt-proxy /usr/local/bin/dnscrypt-proxy
 RUN mkdir -p /etc/dnscrypt-proxy && chown dnscrypt:dnscrypt /etc/dnscrypt-proxy
 
 # Copy example configuration (users should mount their own config)
-COPY dnscrypt-proxy/example-dnscrypt-proxy.toml /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+COPY --from=builder /src/dnscrypt-proxy/example-dnscrypt-proxy.toml /etc/dnscrypt-proxy/dnscrypt-proxy.toml
 RUN chown dnscrypt:dnscrypt /etc/dnscrypt-proxy/dnscrypt-proxy.toml
 
 # Switch to non-root user
